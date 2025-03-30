@@ -21,6 +21,26 @@
     <br>
     <input id="joinCodeInput" placeholder="Enter Lobby Code">
     <button id="joinBtn">Join Lobby</button>
+    <br><br>
+    <button id="rulesBtn">Rules</button>
+  </div>
+
+  <!-- RULES SCREEN -->
+  <div id="rules" class="hidden">
+    <h2>How to Play</h2>
+    <p>
+      1. One player creates a lobby and shares the code. Everyone else joins with that code.<br>
+      2. The host starts the game once there are at least 3 players.<br>
+      3. Each player gets a question. One random player is the Imposter and gets a slightly different question.<br>
+      4. Everyone types their answer secretly. Once all are ready, everyone's answers are revealed.<br>
+      5. Then the main question is revealed and read aloud. Discuss who seems suspicious!<br>
+      6. Vote on who you think the Imposter is. The results will show who was voted out, and if they were the Imposter.<br>
+      7. Have fun deducing who is lying!
+    </p>
+    <p>
+      <strong>Note:</strong> Answers are typed privately. The Imposter tries to blend in by giving an answer that fits the main question they <em>did not</em> actually see.
+    </p>
+    <button id="backHomeBtn">Back to Home</button>
   </div>
 
   <!-- LOBBY SCREEN -->
@@ -101,6 +121,7 @@
     let questionPair = null;
     let imposter = "";
 
+    // Minimal question for demo; add your full list if desired
     const questions = [
       {
         main: "How many times have you been horseback riding in your life?",
@@ -108,7 +129,9 @@
       }
     ];
 
+    // Shortcut references
     const homeDiv       = document.getElementById('home');
+    const rulesDiv      = document.getElementById('rules');
     const lobbyDiv      = document.getElementById('lobby');
     const questionDiv   = document.getElementById('questionPhase');
     const answersDiv    = document.getElementById('readAnswers');
@@ -117,13 +140,18 @@
     const revealDiv     = document.getElementById('revealPhase');
 
     function showDiv(divID) {
-      [homeDiv, lobbyDiv, questionDiv, answersDiv, mainDiv, votingDiv, revealDiv]
+      [homeDiv, rulesDiv, lobbyDiv, questionDiv, answersDiv, mainDiv, votingDiv, revealDiv]
         .forEach(d => d.classList.add('hidden'));
       document.getElementById(divID).classList.remove('hidden');
     }
 
+    // Home screen buttons
     document.getElementById('createBtn').onclick = createLobby;
     document.getElementById('joinBtn').onclick   = joinLobby;
+    document.getElementById('rulesBtn').onclick  = () => showDiv('rules');
+
+    // Rules screen "Back" button
+    document.getElementById('backHomeBtn').onclick = () => showDiv('home');
 
     async function createLobby() {
       playerName = document.getElementById("nameInput").value.trim();
@@ -182,7 +210,7 @@
       const startBtn = document.getElementById("startGameBtn");
       if (isHost) {
         startBtn.classList.remove("hidden");
-        startBtn.onclick = startGame; // attach event
+        startBtn.onclick = startGame;
       } else {
         startBtn.classList.add("hidden");
       }
@@ -191,19 +219,15 @@
     }
 
     async function startGame() {
-      // fetch the list of players
       const snap = await get(ref(db, `lobbies/${lobbyCode}/players`));
       const players = Object.keys(snap.val() || {});
 
-      // enforce minimum of 3
       if (players.length < 3) {
         alert('You need at least 3 players to start!');
         return;
       }
 
-      // pick imposter
       imposter = players[Math.floor(Math.random() * players.length)];
-      // pick question
       questionPair = questions[Math.floor(Math.random() * questions.length)];
 
       for (const p of players) {
@@ -232,8 +256,7 @@
       });
     }
 
-    const markReadyBtn = document.getElementById("markReadyBtn");
-    markReadyBtn.onclick = markReady;
+    document.getElementById("markReadyBtn").onclick = markReady;
 
     async function loadQuestion() {
       const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`));
