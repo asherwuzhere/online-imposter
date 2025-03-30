@@ -10,6 +10,7 @@
     #lobbyCodeDisplay { font-weight: bold; }
     ul { list-style-type: none; padding: 0; }
     li { margin: 0.5em 0; }
+    .answer-display { color: #666; font-style: italic; margin-left: 0.5em; }
   </style>
 </head>
 <body>
@@ -83,6 +84,7 @@
   <!-- VOTING PHASE -->
   <div id="votingPhase" class="hidden">
     <h2>Vote for the Imposter</h2>
+    <p>Choose who you think received a different question:</p>
     <ul id="voteList"></ul>
   </div>
 
@@ -638,8 +640,8 @@
         }
 
         isHost = (lobbyData.host === playerName);
-        await update(ref(db, `lobbies/${lobbyCode}`), {
-          [`players/${playerName}`]: true
+        await update(ref(db, `lobbies/${lobbyCode}/players`), {
+          [playerName]: true
         });
         
         enterLobby();
@@ -794,6 +796,7 @@
           // Need to submit an answer
           document.getElementById("answerContainer").classList.remove("hidden");
           document.getElementById("waitForOthers").classList.add("hidden");
+          document.getElementById("answerField").value = questionObj.answer || "";
         }
 
         // Setup listener to check if all players are ready
@@ -808,9 +811,4 @@
       onValue(allQuestionsRef, snapshot => {
         if (!snapshot.exists()) return;
         
-        const questionData = snapshot.val();
-        const allReady = Object.values(questionData).every(p => p.ready);
-        
-        if (allReady) {
-          // Everyone is ready, move to next phase
-          update(ref(db, `lobbies/${lobbyCode}`), { phase: "readAnswers" });
+        const questionData = snapshot.
