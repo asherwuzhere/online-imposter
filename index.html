@@ -37,9 +37,13 @@
     <!-- We'll place the question text here -->
     <p id="playerQuestion"></p>
     <!-- Here's the text box for the player's answer -->
-    <input id="answerField" placeholder="Type your answer..."/>
-    <br>
-    <button id="markReadyBtn">I've Written My Answer</button>
+    <div id="answerContainer">
+      <input id="answerField" placeholder="Type your answer..."/><br>
+      <button id="markReadyBtn">I've Written My Answer</button>
+    </div>
+    <div id="waitForOthers" class="hidden">
+      <p>Waiting for everyone else to finish...</p>
+    </div>
   </div>
 
   <!-- READ ANSWERS -->
@@ -60,13 +64,15 @@
   <div id="votingPhase" class="hidden">
     <h2>Vote for the Imposter</h2>
     <ul id="voteList"></ul>
-    <p id="thanksForVoting" class="hidden">Thanks for voting!</p>
+    <div id="thanksForVoting" class="hidden">
+      <p>Thanks for voting! Waiting for everyone else to finish...</p>
+    </div>
   </div>
 
   <!-- REVEAL PHASE -->
   <div id="revealPhase" class="hidden">
     <h2>Imposter Reveal</h2>
-    <div id="revealText"></div>
+    <div id="revealText">Calculating votes...</div>
   </div>
 
   <!-- Single-File JS w/ Firebase -->
@@ -79,7 +85,7 @@
       getDatabase, ref, set, update, get, onValue
     } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js';
 
-    // REPLACE with your config if needed
+    // Your Firebase config:
     const firebaseConfig = {
       apiKey: "AIzaSyA3JrnVvOPto_aQ95MasBEd68-du6gJmCA",
       authDomain: "online-imposter.firebaseapp.com",
@@ -109,7 +115,6 @@
         main: "How many times have you been horseback riding in your life?",
         imposter: "How many sleepaway camps have you been to?"
       }
-      // ... add more if you like ...
     ];
 
     // DOM elements
@@ -170,7 +175,6 @@
         return;
       }
 
-      // If you happen to be the host name, you'll remain isHost
       isHost = (snapshot.val().host === playerName);
 
       await set(ref(db, `lobbies/${lobbyCode}/players/${playerName}`), true);
@@ -246,15 +250,18 @@
     // ---------------------------------------
     // 6) Question Phase
     // ---------------------------------------
-    document.getElementById("markReadyBtn").onclick = markReady;
+    const markReadyBtn = document.getElementById("markReadyBtn");
+    markReadyBtn.onclick = markReady;
 
     async function loadQuestion() {
       const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`));
       const questionObj = qSnap.val();
       if (!questionObj) return;
 
-      // Show player's question
       document.getElementById("playerQuestion").innerText = questionObj.question;
+      // Just ensure input is visible again in case we reloaded
+      document.getElementById("answerContainer").classList.remove("hidden");
+      document.getElementById("waitForOthers").classList.add("hidden");
     }
 
     async function markReady() {
@@ -274,6 +281,11 @@
         ready: true,
         answer: answer
       });
+
+      // Hide the input so they can't change
+      document.getElementById("answerContainer").classList.add("hidden");
+      // Show waiting text
+      document.getElementById("waitForOthers").classList.remove("hidden");
 
       // Check if all are ready
       onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
@@ -324,7 +336,6 @@
     };
 
     let hasVoted = false; // So we don't double-vote
-
     async function loadVoting() {
       const list = document.getElementById("voteList");
       list.innerHTML = "";
@@ -351,8 +362,12 @@
       if (hasVoted) return; // no re-voting
       hasVoted = true;
       await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), { vote: voted });
+
+      // Hide the vote buttons, show waiting text
+      document.getElementById("voteList").innerHTML = "";
       document.getElementById("thanksForVoting").classList.remove("hidden");
 
+      // watch if all have voted
       onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
         const data = snapshot.val();
         if (!data) return;
@@ -366,45 +381,49 @@
     // ---------------------------------------
     // 9) Final Reveal
     // ---------------------------------------
-    async function loadReveal() {
-      const revealDiv = document.getElementById("revealText");
-      revealDiv.innerHTML = "<p>Calculating votes...</p>";
+    function loadReveal() {
+      // Instead of a one-time get, we do onValue so everyone's results update
+      const revealEl = document.getElementById("revealText");
+      revealEl.innerHTML = "Calculating votes...";
 
-      const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions`));
-      if (!qSnap.exists()) {
-        revealDiv.innerHTML = "<p>No question data found!</p>";
-        return;
-      }
+      onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
+        if (!snapshot.exists()) {
+          revealEl.innerHTML = "No question data found!";
+          return;
+        }
+        const qData = snapshot.val();
+        const votes = {};
+        const votedFor = {};
 
-      const qData = qSnap.val();
-      const votes = {};
-      const votedFor = {};
+        for (const [pName, obj] of Object.entries(qData)) {
+          const v = obj.vote;
+          if (!v) continue;
+          if (!votes[v]) votes[v] = 0;
+          votes[v]++;
+          if (!votedFor[v]) votedFor[v] = [];
+          votedFor[v].push(pName);
+        }
 
-      for (const [pName, obj] of Object.entries(qData)) {
-        const v = obj.vote;
-        if (!v) continue;
-        if (!votes[v]) votes[v] = 0;
-        votes[v]++;
-        if (!votedFor[v]) votedFor[v] = [];
-        votedFor[v].push(pName);
-      }
+        // If no one voted yet, keep 'calculating' text
+        if (Object.keys(votes).length === 0) return;
 
-      let html = "<h3>Voting Results:</h3>";
-      // Show each voted player and how many votes
-      for (const [player, count] of Object.entries(votes)) {
-        const whoVoted = votedFor[player].join(", ");
-        html += `<p>${player}: ${count} vote(s) - Voted by: ${whoVoted}</p>`;
-      }
+        let html = "<h3>Voting Results:</h3>";
+        // Show each voted player and how many votes
+        for (const [player, count] of Object.entries(votes)) {
+          const whoVoted = votedFor[player].join(", ");
+          html += `<p>${player}: ${count} vote(s) - Voted by: ${whoVoted}</p>`;
+        }
 
-      // Determine top voted
-      const sorted = Object.entries(votes).sort((a, b) => b[1] - a[1]);
-      const topVoted = sorted[0][0];
-      const correct = (topVoted === imposter);
+        // Determine top voted
+        const sorted = Object.entries(votes).sort((a, b) => b[1] - a[1]);
+        const topVoted = sorted[0][0];
+        const correct = (topVoted === imposter);
 
-      html += `<p><strong>${topVoted}</strong> was voted out. They were ${correct ? "the imposter ✅" : "not the imposter ❌"}.</p>`;
-      html += `<p>The imposter was <strong>${imposter}</strong>, and their question was: "${questionPair.imposter}"</p>`;
+        html += `<p><strong>${topVoted}</strong> was voted out. They were ${correct ? "the imposter ✅" : "not the imposter ❌"}.</p>`;
+        html += `<p>The imposter was <strong>${imposter}</strong>, and their question was: "${questionPair.imposter}"</p>`;
 
-      revealDiv.innerHTML = html;
+        revealEl.innerHTML = html;
+      });
     }
   </script>
 </body>
