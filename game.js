@@ -5,13 +5,13 @@ import {
 } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js";
 
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyA3JrnVvOPto_aQ95MasBEd68-du6gJmCA",
+  authDomain: "online-imposter.firebaseapp.com",
+  databaseURL: "https://online-imposter-default-rtdb.firebaseio.com",
+  projectId: "online-imposter",
+  storageBucket: "online-imposter.firebasestorage.app",
+  messagingSenderId: "925601269436",
+  appId: "1:925601269436:web:661f6b53a754b5ccbc32b9"
 };
 
 const app = initializeApp(firebaseConfig);
