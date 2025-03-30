@@ -34,7 +34,11 @@
   <!-- QUESTION PHASE -->
   <div id="questionPhase" class="hidden">
     <h2>Your Question</h2>
+    <!-- We'll place the question text here -->
     <p id="playerQuestion"></p>
+    <!-- Here's the text box for the player's answer -->
+    <input id="answerField" placeholder="Type your answer..."/>
+    <br>
     <button id="markReadyBtn">I've Written My Answer</button>
   </div>
 
@@ -75,7 +79,7 @@
       getDatabase, ref, set, update, get, onValue
     } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js';
 
-    // REPLACE with your config if it changes
+    // REPLACE with your config if needed
     const firebaseConfig = {
       apiKey: "AIzaSyA3JrnVvOPto_aQ95MasBEd68-du6gJmCA",
       authDomain: "online-imposter.firebaseapp.com",
@@ -99,6 +103,7 @@
     let imposter = "";
 
     // Basic question array for debugging
+    // Feel free to expand or replace with your full list
     const questions = [
       {
         main: "How many times have you been horseback riding in your life?",
@@ -107,7 +112,7 @@
       // ... add more if you like ...
     ];
 
-    // DOM elements we need frequently
+    // DOM elements
     const homeDiv       = document.getElementById('home');
     const lobbyDiv      = document.getElementById('lobby');
     const questionDiv   = document.getElementById('questionPhase');
@@ -120,7 +125,6 @@
     // 3) Utility / Navigation
     // ---------------------------------------
     function showDiv(divID) {
-      console.log("Navigating to:", divID);
       [homeDiv, lobbyDiv, questionDiv, answersDiv, mainDiv, votingDiv, revealDiv]
         .forEach(d => d.classList.add('hidden'));
       document.getElementById(divID).classList.remove('hidden');
@@ -133,7 +137,6 @@
     document.getElementById('joinBtn').onclick   = joinLobby;
 
     async function createLobby() {
-      console.log("createLobby called");
       playerName = document.getElementById("nameInput").value.trim();
       if (!playerName) {
         alert("Please enter a name.");
@@ -141,8 +144,6 @@
       }
       lobbyCode = Math.random().toString(36).substring(2, 7).toUpperCase();
       isHost = true;
-
-      console.log("Creating lobby:", lobbyCode, "host:", playerName);
 
       await set(ref(db, `lobbies/${lobbyCode}`), {
         players: { [playerName]: true },
@@ -153,7 +154,6 @@
     }
 
     async function joinLobby() {
-      console.log("joinLobby called");
       playerName = document.getElementById("nameInput").value.trim();
       lobbyCode  = document.getElementById("joinCodeInput").value.trim().toUpperCase();
 
@@ -170,17 +170,15 @@
         return;
       }
 
-      console.log("Joining lobby:", lobbyCode, "as", playerName);
+      // If you happen to be the host name, you'll remain isHost
+      isHost = (snapshot.val().host === playerName);
 
-      isHost = (snapshot.val().host === playerName); // if your name matches the host in DB
       await set(ref(db, `lobbies/${lobbyCode}/players/${playerName}`), true);
       enterLobby();
     }
 
     function enterLobby() {
-      console.log("enterLobby =>", playerName, lobbyCode, "Host?", isHost);
       showDiv("lobby");
-
       document.getElementById("lobbyCodeDisplay").innerText = lobbyCode;
 
       const playerList = document.getElementById("playerList");
@@ -205,9 +203,7 @@
 
     // Host starts the game
     document.getElementById("startGameBtn").onclick = startGame;
-
     async function startGame() {
-      console.log("startGame called by host");
       const snap = await get(ref(db, `lobbies/${lobbyCode}/players`));
       const players = Object.keys(snap.val());
 
@@ -215,8 +211,6 @@
       imposter = players[Math.floor(Math.random() * players.length)];
       // pick question
       questionPair = questions[Math.floor(Math.random() * questions.length)];
-
-      console.log("Imposter:", imposter, "Question Pair:", questionPair);
 
       // assign question to each player
       for (const p of players) {
@@ -237,12 +231,9 @@
     // 5) Phase Handling
     // ---------------------------------------
     function listenForPhaseChange() {
-      console.log("listening for phase changes in lobby:", lobbyCode);
       onValue(ref(db, `lobbies/${lobbyCode}/phase`), snapshot => {
         const phase = snapshot.val();
         if (!phase) return;
-        console.log("Current phase =>", phase);
-
         showDiv(phase);
 
         if (phase === "questionPhase") loadQuestion();
@@ -255,38 +246,30 @@
     // ---------------------------------------
     // 6) Question Phase
     // ---------------------------------------
-    const markReadyBtn = document.getElementById("markReadyBtn");
-    markReadyBtn.onclick = markReady;
+    document.getElementById("markReadyBtn").onclick = markReady;
 
     async function loadQuestion() {
-      console.log("loadQuestion called");
       const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`));
       const questionObj = qSnap.val();
       if (!questionObj) return;
 
+      // Show player's question
       document.getElementById("playerQuestion").innerText = questionObj.question;
     }
 
     async function markReady() {
-      console.log("markReady => sending answer + ready");
-      const answerField = document.createElement("input");
-      // Actually, let's do it differently: 
-      // We'll put an input in the HTML earlier or do it now
-      // But let's say you typed your answer?
-
-      // We'll do the simpler approach: We'll just read a prompt for debugging
-      // But we said in the code we want an <input>? Let's do it:
       const inputEl = document.getElementById("answerField");
       if (!inputEl) {
         alert("No answer input found!");
         return;
       }
-      const answer = inputEl.value;
+      const answer = inputEl.value.trim();
       if (!answer) {
         alert("Please type an answer!");
         return;
       }
 
+      // Mark the player's question doc with 'answer' + ready = true
       await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), {
         ready: true,
         answer: answer
@@ -309,7 +292,6 @@
     document.getElementById("revealMainBtn").onclick = revealMainQuestion;
 
     async function loadAnswers() {
-      console.log("loadAnswers called");
       const ansListEl = document.getElementById("answerList");
       ansListEl.innerHTML = "";
       const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions`));
@@ -324,7 +306,6 @@
     }
 
     function revealMainQuestion() {
-      console.log("revealMainQuestion => main question + TTS");
       showDiv("mainReveal");
       document.getElementById("mainQuestionDisplay").innerText = questionPair.main;
       speak(`The main question was: ${questionPair.main}`);
@@ -345,7 +326,6 @@
     let hasVoted = false; // So we don't double-vote
 
     async function loadVoting() {
-      console.log("loadVoting called");
       const list = document.getElementById("voteList");
       list.innerHTML = "";
       document.getElementById("thanksForVoting").classList.add("hidden");
@@ -370,12 +350,9 @@
     async function submitVote(voted) {
       if (hasVoted) return; // no re-voting
       hasVoted = true;
-
-      console.log("submitVote =>", voted);
       await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), { vote: voted });
-
       document.getElementById("thanksForVoting").classList.remove("hidden");
-      // check if everyone voted
+
       onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
         const data = snapshot.val();
         if (!data) return;
@@ -390,7 +367,6 @@
     // 9) Final Reveal
     // ---------------------------------------
     async function loadReveal() {
-      console.log("loadReveal called");
       const revealDiv = document.getElementById("revealText");
       revealDiv.innerHTML = "<p>Calculating votes...</p>";
 
@@ -416,8 +392,8 @@
       let html = "<h3>Voting Results:</h3>";
       // Show each voted player and how many votes
       for (const [player, count] of Object.entries(votes)) {
-        const whoVotedThem = votedFor[player].join(", ");
-        html += `<p>${player}: ${count} vote(s) - Voted by: ${whoVotedThem}</p>`;
+        const whoVoted = votedFor[player].join(", ");
+        html += `<p>${player}: ${count} vote(s) - Voted by: ${whoVoted}</p>`;
       }
 
       // Determine top voted
