@@ -33,7 +33,7 @@
       2. The host starts the game once there are at least 3 players.<br>
       3. Each player gets a question. One random player is the Imposter and gets a slightly different question.<br>
       4. Everyone types their answer secretly. Once all are ready, everyone's answers are revealed.<br>
-      5. Then the main question is revealed and read aloud. Discuss who seems suspicious!<br>
+      5. Then the main question is revealed. Only the host’s browser will read it aloud; everyone sees it on screen.<br>
       6. Vote on who you think the Imposter is. The results will show who was voted out, and if they were the Imposter.<br>
       7. Have fun deducing who is lying!
     </p>
@@ -54,9 +54,7 @@
   <!-- QUESTION PHASE -->
   <div id="questionPhase" class="hidden">
     <h2>Your Question</h2>
-    <!-- We'll place the question text here -->
     <p id="playerQuestion"></p>
-    <!-- Here's the text box for the player's answer -->
     <div id="answerContainer">
       <input id="answerField" placeholder="Type your answer..."/><br>
       <button id="markReadyBtn">I've Written My Answer</button>
@@ -84,9 +82,12 @@
   <div id="votingPhase" class="hidden">
     <h2>Vote for the Imposter</h2>
     <ul id="voteList"></ul>
-    <div id="thanksForVoting" class="hidden">
-      <p>Thanks for voting! Waiting for everyone else to finish...</p>
-    </div>
+  </div>
+
+  <!-- POST-VOTE WAIT SCREEN (LOCAL ONLY) -->
+  <div id="postVoteWait" class="hidden">
+    <h2>Thanks for voting!</h2>
+    <p>Waiting for everyone else to finish...</p>
   </div>
 
   <!-- REVEAL PHASE -->
@@ -121,7 +122,7 @@
     let questionPair = null;
     let imposter = "";
 
-    // Minimal question for demo; add your full list if desired
+    // Minimal question for demo
     const questions = [
       {
         main: "How many times have you been horseback riding in your life?",
@@ -129,7 +130,7 @@
       }
     ];
 
-    // Shortcut references
+    // DOM references
     const homeDiv       = document.getElementById('home');
     const rulesDiv      = document.getElementById('rules');
     const lobbyDiv      = document.getElementById('lobby');
@@ -137,20 +138,22 @@
     const answersDiv    = document.getElementById('readAnswers');
     const mainDiv       = document.getElementById('mainReveal');
     const votingDiv     = document.getElementById('votingPhase');
+    const postVoteDiv   = document.getElementById('postVoteWait');
     const revealDiv     = document.getElementById('revealPhase');
 
     function showDiv(divID) {
-      [homeDiv, rulesDiv, lobbyDiv, questionDiv, answersDiv, mainDiv, votingDiv, revealDiv]
-        .forEach(d => d.classList.add('hidden'));
+      [
+        homeDiv, rulesDiv, lobbyDiv,
+        questionDiv, answersDiv, mainDiv,
+        votingDiv, postVoteDiv, revealDiv
+      ].forEach(d => d.classList.add('hidden'));
       document.getElementById(divID).classList.remove('hidden');
     }
 
-    // Home screen buttons
+    // Home screen
     document.getElementById('createBtn').onclick = createLobby;
     document.getElementById('joinBtn').onclick   = joinLobby;
     document.getElementById('rulesBtn').onclick  = () => showDiv('rules');
-
-    // Rules screen "Back" button
     document.getElementById('backHomeBtn').onclick = () => showDiv('home');
 
     async function createLobby() {
@@ -173,7 +176,6 @@
     async function joinLobby() {
       playerName = document.getElementById("nameInput").value.trim();
       lobbyCode  = document.getElementById("joinCodeInput").value.trim().toUpperCase();
-
       if (!playerName || !lobbyCode) {
         alert("Please enter name and lobby code.");
         return;
@@ -188,7 +190,6 @@
       }
 
       isHost = (snapshot.val().host === playerName);
-
       await set(ref(db, `lobbies/${lobbyCode}/players/${playerName}`), true);
       enterLobby();
     }
@@ -247,17 +248,23 @@
       onValue(ref(db, `lobbies/${lobbyCode}/phase`), snapshot => {
         const phase = snapshot.val();
         if (!phase) return;
-        showDiv(phase);
+
+        if (phase === "questionPhase") showDiv("questionPhase");
+        if (phase === "readAnswers")   showDiv("readAnswers");
+        if (phase === "mainReveal")    showDiv("mainReveal");
+        if (phase === "votingPhase")   showDiv("votingPhase");
+        if (phase === "revealPhase")   showDiv("revealPhase");
 
         if (phase === "questionPhase") loadQuestion();
         if (phase === "readAnswers")   loadAnswers();
+        if (phase === "mainReveal")    loadMainReveal();
         if (phase === "votingPhase")   loadVoting();
         if (phase === "revealPhase")   loadReveal();
       });
     }
 
+    // Question Phase
     document.getElementById("markReadyBtn").onclick = markReady;
-
     async function loadQuestion() {
       const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`));
       const questionObj = qSnap.val();
@@ -280,11 +287,13 @@
         return;
       }
 
+      // Submit to DB
       await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), {
         ready: true,
         answer: answer
       });
 
+      // Hide input, show waiting text
       document.getElementById("answerContainer").classList.add("hidden");
       document.getElementById("waitForOthers").classList.remove("hidden");
 
@@ -298,8 +307,10 @@
       });
     }
 
-    document.getElementById("revealMainBtn").onclick = revealMainQuestion;
-
+    // Read Answers
+    document.getElementById("revealMainBtn").onclick = () => {
+      update(ref(db, `lobbies/${lobbyCode}`), { phase: "mainReveal" });
+    };
     async function loadAnswers() {
       const ansListEl = document.getElementById("answerList");
       ansListEl.innerHTML = "";
@@ -314,32 +325,34 @@
       }
     }
 
-    function revealMainQuestion() {
-      showDiv("mainReveal");
+    // Main Reveal
+    function loadMainReveal() {
       document.getElementById("mainQuestionDisplay").innerText = questionPair.main;
-      speak(`The main question was: ${questionPair.main}`);
+      if (isHost) {
+        speak(`The main question was: ${questionPair.main}`);
+      }
     }
+    document.getElementById("goToVotingBtn").onclick = () => {
+      update(ref(db, `lobbies/${lobbyCode}`), { phase: "votingPhase" });
+    };
 
     function speak(text) {
       const msg = new SpeechSynthesisUtterance(text);
       window.speechSynthesis.speak(msg);
     }
 
-    document.getElementById("goToVotingBtn").onclick = () => {
-      update(ref(db, `lobbies/${lobbyCode}`), { phase: "votingPhase" });
-    };
-
+    // Voting
     let hasVoted = false;
     async function loadVoting() {
       const list = document.getElementById("voteList");
       list.innerHTML = "";
-      document.getElementById("thanksForVoting").classList.add("hidden");
 
       const playersSnap = await get(ref(db, `lobbies/${lobbyCode}/players`));
       if (!playersSnap.exists()) return;
       const playersObj = playersSnap.val();
       const playerNames = Object.keys(playersObj);
 
+      // For each other player, create a Vote button
       playerNames.forEach(p => {
         if (p !== playerName) {
           const li = document.createElement("li");
@@ -352,24 +365,29 @@
       });
     }
 
-    async function submitVote(voted) {
+    async function submitVote(votedPlayer) {
       if (hasVoted) return;
       hasVoted = true;
-      await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), { vote: voted });
 
-      document.getElementById("voteList").innerHTML = "";
-      document.getElementById("thanksForVoting").classList.remove("hidden");
+      // Send to DB
+      await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), { vote: votedPlayer });
 
+      // Locally, show the postVoteWait screen while others still vote
+      showDiv("postVoteWait");
+
+      // Watch if everyone has voted
       onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
         const data = snapshot.val();
         if (!data) return;
         const allVoted = Object.values(data).every(x => x.vote);
         if (allVoted) {
+          // Everyone has voted => move to reveal
           update(ref(db, `lobbies/${lobbyCode}`), { phase: "revealPhase" });
         }
       });
     }
 
+    // Reveal
     function loadReveal() {
       const revealEl = document.getElementById("revealText");
       revealEl.innerHTML = "Calculating votes...";
@@ -400,6 +418,7 @@
           html += `<p>${player}: ${count} vote(s) - Voted by: ${whoVoted}</p>`;
         }
 
+        // Highest votes
         const sorted = Object.entries(votes).sort((a, b) => b[1] - a[1]);
         const topVoted = sorted[0][0];
         const correct = (topVoted === imposter);
