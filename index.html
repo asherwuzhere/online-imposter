@@ -77,15 +77,11 @@
 
   <!-- Single-File JS w/ Firebase -->
   <script type="module">
-    // ---------------------------------------
-    // 1) Firebase Setup
-    // ---------------------------------------
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js';
     import {
       getDatabase, ref, set, update, get, onValue
     } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js';
 
-    // Your Firebase config:
     const firebaseConfig = {
       apiKey: "AIzaSyA3JrnVvOPto_aQ95MasBEd68-du6gJmCA",
       authDomain: "online-imposter.firebaseapp.com",
@@ -99,17 +95,12 @@
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
-    // ---------------------------------------
-    // 2) Global Variables
-    // ---------------------------------------
     let playerName = "";
     let lobbyCode = "";
     let isHost = false;
     let questionPair = null;
     let imposter = "";
 
-    // Basic question array for debugging
-    // Feel free to expand or replace with your full list
     const questions = [
       {
         main: "How many times have you been horseback riding in your life?",
@@ -117,7 +108,6 @@
       }
     ];
 
-    // DOM elements
     const homeDiv       = document.getElementById('home');
     const lobbyDiv      = document.getElementById('lobby');
     const questionDiv   = document.getElementById('questionPhase');
@@ -126,18 +116,12 @@
     const votingDiv     = document.getElementById('votingPhase');
     const revealDiv     = document.getElementById('revealPhase');
 
-    // ---------------------------------------
-    // 3) Utility / Navigation
-    // ---------------------------------------
     function showDiv(divID) {
       [homeDiv, lobbyDiv, questionDiv, answersDiv, mainDiv, votingDiv, revealDiv]
         .forEach(d => d.classList.add('hidden'));
       document.getElementById(divID).classList.remove('hidden');
     }
 
-    // ---------------------------------------
-    // 4) Lobby Handling
-    // ---------------------------------------
     document.getElementById('createBtn').onclick = createLobby;
     document.getElementById('joinBtn').onclick   = joinLobby;
 
@@ -198,6 +182,7 @@
       const startBtn = document.getElementById("startGameBtn");
       if (isHost) {
         startBtn.classList.remove("hidden");
+        startBtn.onclick = startGame; // attach event
       } else {
         startBtn.classList.add("hidden");
       }
@@ -205,20 +190,24 @@
       listenForPhaseChange();
     }
 
-    // Host starts the game
-    document.getElementById("startGameBtn").onclick = startGame;
     async function startGame() {
+      // fetch the list of players
       const snap = await get(ref(db, `lobbies/${lobbyCode}/players`));
-      const players = Object.keys(snap.val());
+      const players = Object.keys(snap.val() || {});
+
+      // enforce minimum of 3
+      if (players.length < 3) {
+        alert('You need at least 3 players to start!');
+        return;
+      }
 
       // pick imposter
       imposter = players[Math.floor(Math.random() * players.length)];
       // pick question
       questionPair = questions[Math.floor(Math.random() * questions.length)];
 
-      // assign question to each player
       for (const p of players) {
-        const q = (p === imposter) ? questionPair.imposter : questionPair.main;
+        const q = p === imposter ? questionPair.imposter : questionPair.main;
         await set(ref(db, `lobbies/${lobbyCode}/questions/${p}`), {
           question: q,
           answer: "",
@@ -227,13 +216,9 @@
         });
       }
 
-      // change phase
       update(ref(db, `lobbies/${lobbyCode}`), { phase: "questionPhase" });
     }
 
-    // ---------------------------------------
-    // 5) Phase Handling
-    // ---------------------------------------
     function listenForPhaseChange() {
       onValue(ref(db, `lobbies/${lobbyCode}/phase`), snapshot => {
         const phase = snapshot.val();
@@ -247,9 +232,6 @@
       });
     }
 
-    // ---------------------------------------
-    // 6) Question Phase
-    // ---------------------------------------
     const markReadyBtn = document.getElementById("markReadyBtn");
     markReadyBtn.onclick = markReady;
 
@@ -259,7 +241,6 @@
       if (!questionObj) return;
 
       document.getElementById("playerQuestion").innerText = questionObj.question;
-      // Just ensure input is visible again in case we reloaded
       document.getElementById("answerContainer").classList.remove("hidden");
       document.getElementById("waitForOthers").classList.add("hidden");
     }
@@ -276,18 +257,14 @@
         return;
       }
 
-      // Mark the player's question doc with 'answer' + ready = true
       await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), {
         ready: true,
         answer: answer
       });
 
-      // Hide the input so they can't change
       document.getElementById("answerContainer").classList.add("hidden");
-      // Show waiting text
       document.getElementById("waitForOthers").classList.remove("hidden");
 
-      // Check if all are ready
       onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
         if (!snapshot.exists()) return;
         const questionData = snapshot.val();
@@ -298,9 +275,6 @@
       });
     }
 
-    // ---------------------------------------
-    // 7) Read Answers
-    // ---------------------------------------
     document.getElementById("revealMainBtn").onclick = revealMainQuestion;
 
     async function loadAnswers() {
@@ -328,14 +302,11 @@
       window.speechSynthesis.speak(msg);
     }
 
-    // ---------------------------------------
-    // 8) Voting Phase
-    // ---------------------------------------
     document.getElementById("goToVotingBtn").onclick = () => {
       update(ref(db, `lobbies/${lobbyCode}`), { phase: "votingPhase" });
     };
 
-    let hasVoted = false; // So we don't double-vote
+    let hasVoted = false;
     async function loadVoting() {
       const list = document.getElementById("voteList");
       list.innerHTML = "";
@@ -359,15 +330,13 @@
     }
 
     async function submitVote(voted) {
-      if (hasVoted) return; // no re-voting
+      if (hasVoted) return;
       hasVoted = true;
       await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), { vote: voted });
 
-      // Hide the vote buttons, show waiting text
       document.getElementById("voteList").innerHTML = "";
       document.getElementById("thanksForVoting").classList.remove("hidden");
 
-      // watch if all have voted
       onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
         const data = snapshot.val();
         if (!data) return;
@@ -378,11 +347,7 @@
       });
     }
 
-    // ---------------------------------------
-    // 9) Final Reveal
-    // ---------------------------------------
     function loadReveal() {
-      // Instead of a one-time get, we do onValue so everyone's results update
       const revealEl = document.getElementById("revealText");
       revealEl.innerHTML = "Calculating votes...";
 
@@ -404,17 +369,14 @@
           votedFor[v].push(pName);
         }
 
-        // If no one voted yet, keep 'calculating' text
         if (Object.keys(votes).length === 0) return;
 
         let html = "<h3>Voting Results:</h3>";
-        // Show each voted player and how many votes
         for (const [player, count] of Object.entries(votes)) {
           const whoVoted = votedFor[player].join(", ");
           html += `<p>${player}: ${count} vote(s) - Voted by: ${whoVoted}</p>`;
         }
 
-        // Determine top voted
         const sorted = Object.entries(votes).sort((a, b) => b[1] - a[1]);
         const topVoted = sorted[0][0];
         const correct = (topVoted === imposter);
