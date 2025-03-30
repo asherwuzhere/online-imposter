@@ -8,6 +8,8 @@
     input, button { margin: 0.5em; padding: 0.5em; font-size: 1em; }
     .hidden { display: none; }
     #lobbyCodeDisplay { font-weight: bold; }
+    ul { list-style-type: none; padding: 0; }
+    li { margin: 0.5em 0; }
   </style>
 </head>
 <body>
@@ -33,7 +35,7 @@
       2. The host starts the game once there are at least 3 players.<br>
       3. Each player gets a question. One random player is the Imposter and gets a slightly different question.<br>
       4. Everyone types their answer secretly. Once all are ready, everyone's answers are revealed.<br>
-      5. Then the main question is revealed. Only the host’s browser will read it aloud; everyone sees it on screen.<br>
+      5. Then the main question is revealed. Only the host's browser will read it aloud; everyone sees it on screen.<br>
       6. Vote on who you think the Imposter is. The results will show who was voted out, and if they were the Imposter.<br>
       7. Have fun deducing who is lying!
     </p>
@@ -48,7 +50,6 @@
     <h2>Lobby Code: <span id="lobbyCodeDisplay"></span></h2>
     <h3>Players:</h3>
     <ul id="playerList"></ul>
-    <!-- Host-only button -->
     <button id="startGameBtn" class="hidden">Start Game</button>
   </div>
 
@@ -69,16 +70,14 @@
   <div id="readAnswers" class="hidden">
     <h2>Everyone's Answers</h2>
     <ul id="answerList"></ul>
-    <!-- Host-only button to reveal main question -->
-    <button id="revealMainBtn">Reveal Main Question</button>
+    <button id="revealMainBtn" class="hidden">Reveal Main Question</button>
   </div>
 
   <!-- MAIN REVEAL -->
   <div id="mainReveal" class="hidden">
     <h2>MAIN QUESTION</h2>
     <p id="mainQuestionDisplay"></p>
-    <!-- Host-only button to move on to voting -->
-    <button id="goToVotingBtn">Go to Voting</button>
+    <button id="goToVotingBtn" class="hidden">Go to Voting</button>
   </div>
 
   <!-- VOTING PHASE -->
@@ -103,7 +102,7 @@
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js';
     import {
-      getDatabase, ref, set, update, get, onValue
+      getDatabase, ref, set, update, get, onValue, off
     } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js';
 
     const firebaseConfig = {
@@ -124,12 +123,21 @@
     let isHost = false;
     let questionPair = null;
     let imposter = "";
+    let allQuestionsRef = null;
 
-    // Minimal question for demo
+    // More question pairs for variety
     const questions = [
       {
         main: "How many times have you been horseback riding in your life?",
         imposter: "How many sleepaway camps have you been to?"
+      },
+      {
+        main: "What's your favorite board game?",
+        imposter: "What's your favorite card game?"
+      },
+      {
+        main: "What's the most interesting place you've traveled to?",
+        imposter: "What's your dream vacation destination?"
       }
     ];
 
@@ -165,16 +173,19 @@
         alert("Please enter a name.");
         return;
       }
-      // Generate a simple code
       lobbyCode = Math.random().toString(36).substring(2, 7).toUpperCase();
       isHost = true;
 
-      await set(ref(db, `lobbies/${lobbyCode}`), {
-        players: { [playerName]: true },
-        host: playerName
-      });
-
-      enterLobby();
+      try {
+        await set(ref(db, `lobbies/${lobbyCode}`), {
+          players: { [playerName]: true },
+          host: playerName,
+          phase: "lobby"
+        });
+        enterLobby();
+      } catch (error) {
+        alert("Error creating lobby: " + error.message);
+      }
     }
 
     async function joinLobby() {
@@ -185,20 +196,32 @@
         return;
       }
 
-      const lobbyRef = ref(db, `lobbies/${lobbyCode}`);
-      const snapshot = await get(lobbyRef);
+      try {
+        const lobbyRef = ref(db, `lobbies/${lobbyCode}`);
+        const snapshot = await get(lobbyRef);
 
-      if (!snapshot.exists()) {
-        alert("Lobby not found.");
-        return;
+        if (!snapshot.exists()) {
+          alert("Lobby not found.");
+          return;
+        }
+
+        const lobbyData = snapshot.val();
+        
+        // Check if name is already taken
+        if (lobbyData.players && lobbyData.players[playerName]) {
+          alert("That name is already taken in this lobby.");
+          return;
+        }
+
+        isHost = (lobbyData.host === playerName);
+        await update(ref(db, `lobbies/${lobbyCode}`), {
+          [`players/${playerName}`]: true
+        });
+        
+        enterLobby();
+      } catch (error) {
+        alert("Error joining lobby: " + error.message);
       }
-
-      // Determine if this player is the host
-      isHost = (snapshot.val().host === playerName);
-
-      // Add player to the lobby’s player list
-      await set(ref(db, `lobbies/${lobbyCode}/players/${playerName}`), true);
-      enterLobby();
     }
 
     function enterLobby() {
@@ -206,17 +229,21 @@
       document.getElementById("lobbyCodeDisplay").innerText = lobbyCode;
 
       const playerList = document.getElementById("playerList");
-      onValue(ref(db, `lobbies/${lobbyCode}/players`), snapshot => {
+      const playersRef = ref(db, `lobbies/${lobbyCode}/players`);
+      
+      onValue(playersRef, snapshot => {
         playerList.innerHTML = '';
-        snapshot.forEach(child => {
-          const li = document.createElement("li");
-          li.innerText = child.key;
-          playerList.appendChild(li);
-        });
+        if (snapshot.exists()) {
+          const players = Object.keys(snapshot.val());
+          players.forEach(p => {
+            const li = document.createElement("li");
+            li.innerText = p + (p === playerName ? " (You)" : "");
+            playerList.appendChild(li);
+          });
+        }
       });
 
       const startBtn = document.getElementById("startGameBtn");
-      // Show/hide the start button depending on whether user is Host
       if (isHost) {
         startBtn.classList.remove("hidden");
         startBtn.onclick = startGame;
@@ -228,65 +255,132 @@
     }
 
     async function startGame() {
-      // Make sure there are at least 3 players
-      const snap = await get(ref(db, `lobbies/${lobbyCode}/players`));
-      const players = Object.keys(snap.val() || {});
+      try {
+        const snap = await get(ref(db, `lobbies/${lobbyCode}/players`));
+        if (!snap.exists()) {
+          alert("Error: No players found.");
+          return;
+        }
+        
+        const players = Object.keys(snap.val() || {});
 
-      if (players.length < 3) {
-        alert('You need at least 3 players to start!');
-        return;
-      }
+        if (players.length < 3) {
+          alert('You need at least 3 players to start!');
+          return;
+        }
 
-      // Pick an imposter randomly
-      imposter = players[Math.floor(Math.random() * players.length)];
-      // Pick a random question pair
-      questionPair = questions[Math.floor(Math.random() * questions.length)];
+        // Pick a random imposter and question pair
+        imposter = players[Math.floor(Math.random() * players.length)];
+        questionPair = questions[Math.floor(Math.random() * questions.length)];
 
-      // Assign each player the main or imposter question
-      for (const p of players) {
-        const q = (p === imposter) ? questionPair.imposter : questionPair.main;
-        await set(ref(db, `lobbies/${lobbyCode}/questions/${p}`), {
-          question: q,
-          answer: "",
-          ready: false,
-          vote: null
+        // Store the main question for everyone to reference later
+        await update(ref(db, `lobbies/${lobbyCode}`), {
+          mainQuestion: questionPair.main,
+          imposterQuestion: questionPair.imposter,
+          imposter: imposter
         });
-      }
 
-      // Move to question phase
-      update(ref(db, `lobbies/${lobbyCode}`), { phase: "questionPhase" });
+        // Assign questions to each player
+        for (const p of players) {
+          const q = (p === imposter) ? questionPair.imposter : questionPair.main;
+          await set(ref(db, `lobbies/${lobbyCode}/questions/${p}`), {
+            question: q,
+            answer: "",
+            ready: false,
+            vote: null
+          });
+        }
+
+        // Move to question phase
+        await update(ref(db, `lobbies/${lobbyCode}`), { phase: "questionPhase" });
+      } catch (error) {
+        alert("Error starting game: " + error.message);
+      }
     }
 
     function listenForPhaseChange() {
-      onValue(ref(db, `lobbies/${lobbyCode}/phase`), snapshot => {
+      const phaseRef = ref(db, `lobbies/${lobbyCode}/phase`);
+      onValue(phaseRef, snapshot => {
+        if (!snapshot.exists()) return;
+        
         const phase = snapshot.val();
-        if (!phase) return;
+        
+        // Clear any existing listeners when changing phases
+        if (allQuestionsRef) {
+          off(allQuestionsRef);
+          allQuestionsRef = null;
+        }
 
-        if (phase === "questionPhase") showDiv("questionPhase");
-        if (phase === "readAnswers")   showDiv("readAnswers");
-        if (phase === "mainReveal")    showDiv("mainReveal");
-        if (phase === "votingPhase")   showDiv("votingPhase");
-        if (phase === "revealPhase")   showDiv("revealPhase");
-
-        // Load each phase’s data when it hits
-        if (phase === "questionPhase") loadQuestion();
-        if (phase === "readAnswers")   loadAnswers();
-        if (phase === "mainReveal")    loadMainReveal();
-        if (phase === "votingPhase")   loadVoting();
-        if (phase === "revealPhase")   loadReveal();
+        if (phase === "lobby") showDiv("lobby");
+        else if (phase === "questionPhase") {
+          showDiv("questionPhase");
+          loadQuestion();
+        }
+        else if (phase === "readAnswers") {
+          showDiv("readAnswers");
+          loadAnswers();
+        }
+        else if (phase === "mainReveal") {
+          showDiv("mainReveal");
+          loadMainReveal();
+        }
+        else if (phase === "votingPhase") {
+          showDiv("votingPhase");
+          loadVoting();
+        }
+        else if (phase === "revealPhase") {
+          showDiv("revealPhase");
+          loadReveal();
+        }
       });
     }
 
     // Question Phase
     document.getElementById("markReadyBtn").onclick = markReady;
-    async function loadQuestion() {
-      const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`));
-      const questionObj = qSnap.val();
-      if (!questionObj) return;
 
-      document.getElementById("playerQuestion").innerText = questionObj.question;
-      document.getElementById("answerContainer").classList.remove("hidden");
-      document.getElementById("waitForOthers").classList.add("hidden");
+    async function loadQuestion() {
+      try {
+        const myQuestionRef = ref(db, `lobbies/${lobbyCode}/questions/${playerName}`);
+        const qSnap = await get(myQuestionRef);
+        
+        if (!qSnap.exists()) {
+          console.error("Question not found for player");
+          return;
+        }
+
+        const questionObj = qSnap.val();
+        document.getElementById("playerQuestion").innerText = questionObj.question;
+        
+        if (questionObj.ready) {
+          // Already submitted an answer
+          document.getElementById("answerContainer").classList.add("hidden");
+          document.getElementById("waitForOthers").classList.remove("hidden");
+        } else {
+          // Need to submit an answer
+          document.getElementById("answerContainer").classList.remove("hidden");
+          document.getElementById("waitForOthers").classList.add("hidden");
+        }
+
+        // Setup listener to check if all players are ready
+        setupAllReadyListener();
+      } catch (error) {
+        console.error("Error loading question:", error);
+      }
+    }
+
+    function setupAllReadyListener() {
+      allQuestionsRef = ref(db, `lobbies/${lobbyCode}/questions`);
+      onValue(allQuestionsRef, snapshot => {
+        if (!snapshot.exists()) return;
+        
+        const questionData = snapshot.val();
+        const allReady = Object.values(questionData).every(p => p.ready);
+        
+        if (allReady) {
+          // Everyone is ready, move to next phase
+          update(ref(db, `lobbies/${lobbyCode}`), { phase: "readAnswers" });
+        }
+      });
     }
 
     async function markReady() {
@@ -297,54 +391,55 @@
         return;
       }
 
-      // Submit to DB
-      await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), {
-        ready: true,
-        answer: answer
-      });
+      try {
+        // Submit to DB
+        await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), {
+          ready: true,
+          answer: answer
+        });
 
-      // Hide input, show waiting text
-      document.getElementById("answerContainer").classList.add("hidden");
-      document.getElementById("waitForOthers").classList.remove("hidden");
-
-      // Check if all players are ready
-      onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
-        if (!snapshot.exists()) return;
-        const questionData = snapshot.val();
-        const allReady = Object.values(questionData).every(p => p.ready);
-        if (allReady) {
-          update(ref(db, `lobbies/${lobbyCode}`), { phase: "readAnswers" });
-        }
-      });
+        // Hide input, show waiting text
+        document.getElementById("answerContainer").classList.add("hidden");
+        document.getElementById("waitForOthers").classList.remove("hidden");
+      } catch (error) {
+        alert("Error submitting answer: " + error.message);
+      }
     }
 
     // Read Answers
     document.getElementById("revealMainBtn").onclick = () => {
-      // Only the host’s click actually changes the phase
       if (isHost) {
         update(ref(db, `lobbies/${lobbyCode}`), { phase: "mainReveal" });
       }
     };
 
     async function loadAnswers() {
-      const ansListEl = document.getElementById("answerList");
-      ansListEl.innerHTML = "";
-      const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions`));
-      if (!qSnap.exists()) return;
+      try {
+        const ansListEl = document.getElementById("answerList");
+        ansListEl.innerHTML = "";
+        
+        const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions`));
+        if (!qSnap.exists()) {
+          console.error("No answers found");
+          return;
+        }
 
-      const allQs = qSnap.val();
-      for (const [pName, obj] of Object.entries(allQs)) {
-        const li = document.createElement("li");
-        li.textContent = `${pName}: ${obj.answer}`;
-        ansListEl.appendChild(li);
-      }
+        const allQs = qSnap.val();
+        for (const [pName, obj] of Object.entries(allQs)) {
+          const li = document.createElement("li");
+          li.textContent = `${pName}: ${obj.answer}`;
+          ansListEl.appendChild(li);
+        }
 
-      // Reveal Main Question button should only be visible to Host
-      const revealBtn = document.getElementById("revealMainBtn");
-      if (isHost) {
-        revealBtn.classList.remove("hidden");
-      } else {
-        revealBtn.classList.add("hidden");
+        // Only host sees the Reveal Main button
+        const revealBtn = document.getElementById("revealMainBtn");
+        if (isHost) {
+          revealBtn.classList.remove("hidden");
+        } else {
+          revealBtn.classList.add("hidden");
+        }
+      } catch (error) {
+        console.error("Error loading answers:", error);
       }
     }
 
@@ -355,92 +450,143 @@
       }
     };
 
-    function loadMainReveal() {
-      // Show the main question to all
-      document.getElementById("mainQuestionDisplay").innerText = questionPair.main;
-
-      // Only the host does text-to-speech
-      if (isHost) {
-        speak(`The main question was: ${questionPair.main}`);
-      }
-
-      // Show/hide the button for going to voting
-      const goToVotingBtn = document.getElementById("goToVotingBtn");
-      if (isHost) {
-        goToVotingBtn.classList.remove("hidden");
-      } else {
-        goToVotingBtn.classList.add("hidden");
+    async function loadMainReveal() {
+      try {
+        const gameDataRef = ref(db, `lobbies/${lobbyCode}`);
+        const snapshot = await get(gameDataRef);
+        
+        if (!snapshot.exists()) {
+          console.error("Game data not found");
+          return;
+        }
+        
+        const gameData = snapshot.val();
+        document.getElementById("mainQuestionDisplay").innerText = gameData.mainQuestion;
+        
+        if (isHost && gameData.mainQuestion) {
+          speak(`The main question was: ${gameData.mainQuestion}`);
+        }
+        
+        // Only host sees the Go To Voting button
+        const goToVotingBtn = document.getElementById("goToVotingBtn");
+        if (isHost) {
+          goToVotingBtn.classList.remove("hidden");
+        } else {
+          goToVotingBtn.classList.add("hidden");
+        }
+      } catch (error) {
+        console.error("Error loading main reveal:", error);
       }
     }
 
     function speak(text) {
-      const msg = new SpeechSynthesisUtterance(text);
-      window.speechSynthesis.speak(msg);
+      if ('speechSynthesis' in window) {
+        const msg = new SpeechSynthesisUtterance(text);
+        window.speechSynthesis.speak(msg);
+      }
     }
 
-    // Voting Phase
+    // Voting
     let hasVoted = false;
+    
     async function loadVoting() {
-      const list = document.getElementById("voteList");
-      list.innerHTML = "";
-      hasVoted = false; // Reset local voting flag each time we load voting
+      try {
+        const list = document.getElementById("voteList");
+        list.innerHTML = "";
+        hasVoted = false;
 
-      const playersSnap = await get(ref(db, `lobbies/${lobbyCode}/players`));
-      if (!playersSnap.exists()) return;
-      const playersObj = playersSnap.val();
-      const playerNames = Object.keys(playersObj);
-
-      // For each other player, create a Vote button
-      playerNames.forEach(p => {
-        if (p !== playerName) {
-          const li = document.createElement("li");
-          const btn = document.createElement("button");
-          btn.textContent = `Vote ${p}`;
-          btn.onclick = () => submitVote(p);
-          li.appendChild(btn);
-          list.appendChild(li);
+        const playersSnap = await get(ref(db, `lobbies/${lobbyCode}/players`));
+        if (!playersSnap.exists()) {
+          console.error("No players found");
+          return;
         }
-      });
+        
+        const playerNames = Object.keys(playersSnap.val());
+
+        // Check if player has already voted
+        const myVoteSnap = await get(ref(db, `lobbies/${lobbyCode}/questions/${playerName}/vote`));
+        if (myVoteSnap.exists() && myVoteSnap.val()) {
+          hasVoted = true;
+          showDiv("postVoteWait");
+          setupAllVotedListener();
+          return;
+        }
+
+        // Create voting buttons for all players except self
+        playerNames.forEach(p => {
+          if (p !== playerName) {
+            const li = document.createElement("li");
+            const btn = document.createElement("button");
+            btn.textContent = `Vote ${p}`;
+            btn.onclick = () => submitVote(p);
+            li.appendChild(btn);
+            list.appendChild(li);
+          }
+        });
+      } catch (error) {
+        console.error("Error loading voting:", error);
+      }
     }
 
     async function submitVote(votedPlayer) {
       if (hasVoted) return;
       hasVoted = true;
 
-      // Send the vote to DB
-      await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), { vote: votedPlayer });
+      try {
+        await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), { vote: votedPlayer });
+        showDiv("postVoteWait");
+        setupAllVotedListener();
+      } catch (error) {
+        console.error("Error submitting vote:", error);
+        hasVoted = false;
+      }
+    }
 
-      // Locally, show the postVoteWait screen while others still vote
-      showDiv("postVoteWait");
-
-      // Watch if everyone has voted
-      onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
+    function setupAllVotedListener() {
+      allQuestionsRef = ref(db, `lobbies/${lobbyCode}/questions`);
+      onValue(allQuestionsRef, snapshot => {
+        if (!snapshot.exists()) return;
+        
         const data = snapshot.val();
-        if (!data) return;
         const allVoted = Object.values(data).every(x => x.vote);
+        
         if (allVoted) {
-          // Everyone has voted => move to reveal
           update(ref(db, `lobbies/${lobbyCode}`), { phase: "revealPhase" });
         }
       });
     }
 
-    // Reveal Phase
-    function loadReveal() {
-      const revealEl = document.getElementById("revealText");
-      revealEl.innerHTML = "Calculating votes...";
+    // Reveal
+    async function loadReveal() {
+      try {
+        const revealEl = document.getElementById("revealText");
+        revealEl.innerHTML = "Calculating votes...";
 
-      onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
-        if (!snapshot.exists()) {
+        // Get game data to know who the imposter was
+        const gameDataRef = ref(db, `lobbies/${lobbyCode}`);
+        const gameDataSnap = await get(gameDataRef);
+        
+        if (!gameDataSnap.exists()) {
+          revealEl.innerHTML = "Game data not found!";
+          return;
+        }
+        
+        const gameData = gameDataSnap.val();
+        imposter = gameData.imposter;
+
+        // Get voting data
+        const qRef = ref(db, `lobbies/${lobbyCode}/questions`);
+        const qSnap = await get(qRef);
+        
+        if (!qSnap.exists()) {
           revealEl.innerHTML = "No question data found!";
           return;
         }
-
-        const qData = snapshot.val();
+        
+        const qData = qSnap.val();
         const votes = {};
         const votedFor = {};
 
-        // Tally votes
         for (const [pName, obj] of Object.entries(qData)) {
           const v = obj.vote;
           if (!v) continue;
@@ -461,16 +607,17 @@
           html += `<p>${player}: ${count} vote(s) - Voted by: ${whoVoted}</p>`;
         }
 
-        // Find who got the most votes
         const sorted = Object.entries(votes).sort((a, b) => b[1] - a[1]);
         const topVoted = sorted[0][0];
         const correct = (topVoted === imposter);
 
         html += `<p><strong>${topVoted}</strong> was voted out. They were ${correct ? "the imposter ✅" : "not the imposter ❌"}.</p>`;
-        html += `<p>The imposter was <strong>${imposter}</strong>, and their question was: "${questionPair.imposter}"</p>`;
+        html += `<p>The imposter was <strong>${imposter}</strong>, and their question was: "${gameData.imposterQuestion}"</p>`;
 
         revealEl.innerHTML = html;
-      });
+      } catch (error) {
+        console.error("Error loading reveal:", error);
+      }
     }
   </script>
 </body>
