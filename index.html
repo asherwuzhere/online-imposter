@@ -83,10 +83,10 @@
 
   <!-- VOTING PHASE -->
   <div id="votingPhase" class="hidden">
-    <h2>Vote for the Imposter</h2>
-    <p>Choose who you think received a different question:</p>
-    <ul id="voteList"></ul>
-  </div>
+  <h2>Vote for the Imposter</h2>
+  <p>Choose who you think received a different question:</p>
+  <ul id="voteList"></ul>
+</div>
 
   <!-- POST-VOTE WAIT SCREEN (LOCAL ONLY) -->
   <div id="postVoteWait" class="hidden">
@@ -127,7 +127,7 @@
     let imposter = "";
     let allQuestionsRef = null;
 
-    // Expanded set of question pairs
+    // I have more questions saved elsewhere
     const questions = [
       {
         q1: "How many times have you been horseback riding in your life?",
@@ -932,7 +932,7 @@
         const list = document.getElementById("voteList");
         list.innerHTML = "";
         hasVoted = false;
-
+    
         const playersSnap = await get(ref(db, `lobbies/${lobbyCode}/players`));
         if (!playersSnap.exists()) {
           console.error("No players found");
@@ -940,7 +940,15 @@
         }
         
         const playerNames = Object.keys(playersSnap.val());
-
+    
+        // Get all player answers
+        const answersSnap = await get(ref(db, `lobbies/${lobbyCode}/questions`));
+        if (!answersSnap.exists()) {
+          console.error("No answers found");
+          return;
+        }
+        const answerData = answersSnap.val();
+    
         // Check if player has already voted
         const myVoteSnap = await get(ref(db, `lobbies/${lobbyCode}/questions/${playerName}/vote`));
         if (myVoteSnap.exists() && myVoteSnap.val()) {
@@ -949,15 +957,21 @@
           setupAllVotedListener();
           return;
         }
-
+    
         // Create voting buttons for all players except self
         playerNames.forEach(p => {
           if (p !== playerName) {
             const li = document.createElement("li");
+            const playerAnswer = answerData[p] ? answerData[p].answer : "No answer";
             const btn = document.createElement("button");
             btn.textContent = `Vote ${p}`;
             btn.onclick = () => submitVote(p);
             li.appendChild(btn);
+            li.appendChild(document.createTextNode(` - Answer: `));
+            const span = document.createElement("span");
+            span.className = "answer-display";
+            span.textContent = `"${playerAnswer}"`;
+            li.appendChild(span);
             list.appendChild(li);
           }
         });
@@ -999,7 +1013,7 @@
       try {
         const revealEl = document.getElementById("revealText");
         revealEl.innerHTML = "Calculating votes...";
-
+    
         // Get game data to know who the imposter was
         const gameDataRef = ref(db, `lobbies/${lobbyCode}`);
         const gameDataSnap = await get(gameDataRef);
@@ -1011,7 +1025,7 @@
         
         const gameData = gameDataSnap.val();
         imposter = gameData.imposter;
-
+    
         // Get voting data
         const qRef = ref(db, `lobbies/${lobbyCode}/questions`);
         const qSnap = await get(qRef);
@@ -1024,7 +1038,7 @@
         const qData = qSnap.val();
         const votes = {};
         const votedFor = {};
-
+    
         for (const [pName, obj] of Object.entries(qData)) {
           const v = obj.vote;
           if (!v) continue;
@@ -1033,25 +1047,48 @@
           if (!votedFor[v]) votedFor[v] = [];
           votedFor[v].push(pName);
         }
-
+    
         if (Object.keys(votes).length === 0) {
           revealEl.innerHTML = "No votes received!";
           return;
         }
-
+    
         let html = "<h3>Voting Results:</h3>";
         for (const [player, count] of Object.entries(votes)) {
           const whoVoted = votedFor[player].join(", ");
           html += `<p>${player}: ${count} vote(s) - Voted by: ${whoVoted}</p>`;
         }
-
+    
+        // Sort by vote count, highest first
         const sorted = Object.entries(votes).sort((a, b) => b[1] - a[1]);
-        const topVoted = sorted[0][0];
-        const correct = (topVoted === imposter);
-
-        html += `<p><strong>${topVoted}</strong> was voted out. They were ${correct ? "the imposter ✅" : "not the imposter ❌"}.</p>`;
+        
+        // Check for a tie
+        const highestVotes = sorted[0][1];
+        const tiedPlayers = sorted.filter(([_, count]) => count === highestVotes).map(([name, _]) => name);
+        
+        let resultText;
+        let voteCorrect;
+        
+        if (tiedPlayers.length > 1) {
+          // There's a tie
+          const imposterInTie = tiedPlayers.includes(imposter);
+          resultText = `There was a tie between ${tiedPlayers.join(", ")}`;
+          voteCorrect = imposterInTie ? 
+            `The imposter was among the tied players ✅` : 
+            `The imposter was not among the tied players ❌`;
+        } else {
+          // No tie, single player with highest votes
+          const topVoted = sorted[0][0];
+          const correct = (topVoted === imposter);
+          resultText = `${topVoted} was voted out`;
+          voteCorrect = correct ? 
+            `They were the imposter ✅` : 
+            `They were not the imposter ❌`;
+        }
+        
+        html += `<p><strong>${resultText}.</strong> ${voteCorrect}</p>`;
         html += `<p>The imposter was <strong>${imposter}</strong>, and their question was: "${gameData.imposterQuestion}"</p>`;
-
+    
         revealEl.innerHTML = html;
       } catch (error) {
         console.error("Error loading reveal:", error);
