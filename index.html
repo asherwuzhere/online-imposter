@@ -811,4 +811,252 @@
       onValue(allQuestionsRef, snapshot => {
         if (!snapshot.exists()) return;
         
-        const questionData = snapshot.
+        const questionData = snapshot.val();
+        const allReady = Object.values(questionData).every(p => p.ready);
+        
+        if (allReady) {
+          // Everyone is ready, move to next phase
+          update(ref(db, `lobbies/${lobbyCode}`), { phase: "readAnswers" });
+        }
+      });
+    }
+
+    async function markReady() {
+      const inputEl = document.getElementById("answerField");
+      const answer = inputEl.value.trim();
+      if (!answer) {
+        alert("Please type an answer!");
+        return;
+      }
+
+      try {
+        // Submit to DB
+        await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), {
+          ready: true,
+          answer: answer
+        });
+
+        // Hide input, show waiting text
+        document.getElementById("answerContainer").classList.add("hidden");
+        document.getElementById("waitForOthers").classList.remove("hidden");
+      } catch (error) {
+        alert("Error submitting answer: " + error.message);
+      }
+    }
+
+    // Read Answers
+    document.getElementById("revealMainBtn").onclick = () => {
+      if (isHost) {
+        update(ref(db, `lobbies/${lobbyCode}`), { phase: "mainReveal" });
+      }
+    };
+
+    async function loadAnswers() {
+      try {
+        const ansListEl = document.getElementById("answerList");
+        ansListEl.innerHTML = "";
+        
+        const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions`));
+        if (!qSnap.exists()) {
+          console.error("No answers found");
+          return;
+        }
+
+        const allQs = qSnap.val();
+        for (const [pName, obj] of Object.entries(allQs)) {
+          const li = document.createElement("li");
+          li.textContent = `${pName}: ${obj.answer}`;
+          ansListEl.appendChild(li);
+        }
+
+        // Only host sees the Reveal Main button
+        const revealBtn = document.getElementById("revealMainBtn");
+        if (isHost) {
+          revealBtn.classList.remove("hidden");
+        } else {
+          revealBtn.classList.add("hidden");
+        }
+      } catch (error) {
+        console.error("Error loading answers:", error);
+      }
+    }
+
+    // Main Reveal
+    document.getElementById("goToVotingBtn").onclick = () => {
+      if (isHost) {
+        update(ref(db, `lobbies/${lobbyCode}`), { phase: "votingPhase" });
+      }
+    };
+
+    async function loadMainReveal() {
+      try {
+        const gameDataRef = ref(db, `lobbies/${lobbyCode}`);
+        const snapshot = await get(gameDataRef);
+        
+        if (!snapshot.exists()) {
+          console.error("Game data not found");
+          return;
+        }
+        
+        const gameData = snapshot.val();
+        document.getElementById("mainQuestionDisplay").innerText = gameData.mainQuestion;
+        
+        if (isHost && gameData.mainQuestion) {
+          speak(`The main question was: ${gameData.mainQuestion}`);
+        }
+        
+        // Only host sees the Go To Voting button
+        const goToVotingBtn = document.getElementById("goToVotingBtn");
+        if (isHost) {
+          goToVotingBtn.classList.remove("hidden");
+        } else {
+          goToVotingBtn.classList.add("hidden");
+        }
+      } catch (error) {
+        console.error("Error loading main reveal:", error);
+      }
+    }
+
+    function speak(text) {
+      if ('speechSynthesis' in window) {
+        const msg = new SpeechSynthesisUtterance(text);
+        window.speechSynthesis.speak(msg);
+      }
+    }
+
+    // Voting
+    let hasVoted = false;
+    
+    async function loadVoting() {
+      try {
+        const list = document.getElementById("voteList");
+        list.innerHTML = "";
+        hasVoted = false;
+
+        const playersSnap = await get(ref(db, `lobbies/${lobbyCode}/players`));
+        if (!playersSnap.exists()) {
+          console.error("No players found");
+          return;
+        }
+        
+        const playerNames = Object.keys(playersSnap.val());
+
+        // Check if player has already voted
+        const myVoteSnap = await get(ref(db, `lobbies/${lobbyCode}/questions/${playerName}/vote`));
+        if (myVoteSnap.exists() && myVoteSnap.val()) {
+          hasVoted = true;
+          showDiv("postVoteWait");
+          setupAllVotedListener();
+          return;
+        }
+
+        // Create voting buttons for all players except self
+        playerNames.forEach(p => {
+          if (p !== playerName) {
+            const li = document.createElement("li");
+            const btn = document.createElement("button");
+            btn.textContent = `Vote ${p}`;
+            btn.onclick = () => submitVote(p);
+            li.appendChild(btn);
+            list.appendChild(li);
+          }
+        });
+      } catch (error) {
+        console.error("Error loading voting:", error);
+      }
+    }
+
+    async function submitVote(votedPlayer) {
+      if (hasVoted) return;
+      hasVoted = true;
+
+      try {
+        await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), { vote: votedPlayer });
+        showDiv("postVoteWait");
+        setupAllVotedListener();
+      } catch (error) {
+        console.error("Error submitting vote:", error);
+        hasVoted = false;
+      }
+    }
+
+    function setupAllVotedListener() {
+      allQuestionsRef = ref(db, `lobbies/${lobbyCode}/questions`);
+      onValue(allQuestionsRef, snapshot => {
+        if (!snapshot.exists()) return;
+        
+        const data = snapshot.val();
+        const allVoted = Object.values(data).every(x => x.vote);
+        
+        if (allVoted) {
+          update(ref(db, `lobbies/${lobbyCode}`), { phase: "revealPhase" });
+        }
+      });
+    }
+
+    // Reveal
+    async function loadReveal() {
+      try {
+        const revealEl = document.getElementById("revealText");
+        revealEl.innerHTML = "Calculating votes...";
+
+        // Get game data to know who the imposter was
+        const gameDataRef = ref(db, `lobbies/${lobbyCode}`);
+        const gameDataSnap = await get(gameDataRef);
+        
+        if (!gameDataSnap.exists()) {
+          revealEl.innerHTML = "Game data not found!";
+          return;
+        }
+        
+        const gameData = gameDataSnap.val();
+        imposter = gameData.imposter;
+
+        // Get voting data
+        const qRef = ref(db, `lobbies/${lobbyCode}/questions`);
+        const qSnap = await get(qRef);
+        
+        if (!qSnap.exists()) {
+          revealEl.innerHTML = "No question data found!";
+          return;
+        }
+        
+        const qData = qSnap.val();
+        const votes = {};
+        const votedFor = {};
+
+        for (const [pName, obj] of Object.entries(qData)) {
+          const v = obj.vote;
+          if (!v) continue;
+          if (!votes[v]) votes[v] = 0;
+          votes[v]++;
+          if (!votedFor[v]) votedFor[v] = [];
+          votedFor[v].push(pName);
+        }
+
+        if (Object.keys(votes).length === 0) {
+          revealEl.innerHTML = "No votes received!";
+          return;
+        }
+
+        let html = "<h3>Voting Results:</h3>";
+        for (const [player, count] of Object.entries(votes)) {
+          const whoVoted = votedFor[player].join(", ");
+          html += `<p>${player}: ${count} vote(s) - Voted by: ${whoVoted}</p>`;
+        }
+
+        const sorted = Object.entries(votes).sort((a, b) => b[1] - a[1]);
+        const topVoted = sorted[0][0];
+        const correct = (topVoted === imposter);
+
+        html += `<p><strong>${topVoted}</strong> was voted out. They were ${correct ? "the imposter ✅" : "not the imposter ❌"}.</p>`;
+        html += `<p>The imposter was <strong>${imposter}</strong>, and their question was: "${gameData.imposterQuestion}"</p>`;
+
+        revealEl.innerHTML = html;
+      } catch (error) {
+        console.error("Error loading reveal:", error);
+      }
+    }
+  </script>
+</body>
+</html>
