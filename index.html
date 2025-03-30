@@ -1,59 +1,435 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Imposter Game</title>
+  <meta charset="UTF-8">
+  <title>Online Imposter Game</title>
   <style>
-    body { font-family: sans-serif; text-align: center; padding: 2em; }
+    body { font-family: sans-serif; text-align: center; margin: 2em; }
     input, button { margin: 0.5em; padding: 0.5em; font-size: 1em; }
     .hidden { display: none; }
+    #lobbyCodeDisplay { font-weight: bold; }
   </style>
 </head>
 <body>
+  <!-- HOME SCREEN -->
   <div id="home">
     <h1>Imposter Game</h1>
-    <input id="nameInput" placeholder="Your Name" /> <br>
-    <button onclick="createLobby()">Create Lobby</button> <br>
-    <input id="joinCodeInput" placeholder="Enter Lobby Code" />
-    <button onclick="joinLobby()">Join Lobby</button>
+    <p><b>Create or Join a Lobby</b></p>
+    <input id="nameInput" placeholder="Your Name">
+    <br>
+    <button id="createBtn">Create Lobby</button>
+    <br>
+    <input id="joinCodeInput" placeholder="Enter Lobby Code">
+    <button id="joinBtn">Join Lobby</button>
   </div>
 
+  <!-- LOBBY SCREEN -->
   <div id="lobby" class="hidden">
     <h2>Lobby Code: <span id="lobbyCodeDisplay"></span></h2>
     <h3>Players:</h3>
     <ul id="playerList"></ul>
-    <button id="startGameBtn" onclick="startGame()" class="hidden">Start Game</button>
+    <button id="startGameBtn" class="hidden">Start Game</button>
   </div>
 
+  <!-- QUESTION PHASE -->
   <div id="questionPhase" class="hidden">
-    <h2>Private Question</h2>
+    <h2>Your Question</h2>
     <p id="playerQuestion"></p>
-    <button onclick="markReady()">I've Written My Answer</button>
+    <button id="markReadyBtn">I've Written My Answer</button>
   </div>
 
+  <!-- READ ANSWERS -->
   <div id="readAnswers" class="hidden">
-    <h2>Answer Reading Time</h2>
-    <p>Read your answer out loud now.</p>
-    <button onclick="revealMainQuestion()">Reveal Main Question</button>
+    <h2>Everyone's Answers</h2>
+    <ul id="answerList"></ul>
+    <button id="revealMainBtn">Reveal Main Question</button>
   </div>
 
+  <!-- MAIN REVEAL -->
   <div id="mainReveal" class="hidden">
     <h2>MAIN QUESTION</h2>
     <p id="mainQuestionDisplay"></p>
-    <button onclick="goToVoting()">Go to Voting</button>
+    <button id="goToVotingBtn">Go to Voting</button>
   </div>
 
+  <!-- VOTING PHASE -->
   <div id="votingPhase" class="hidden">
     <h2>Vote for the Imposter</h2>
     <ul id="voteList"></ul>
+    <p id="thanksForVoting" class="hidden">Thanks for voting!</p>
   </div>
 
+  <!-- REVEAL PHASE -->
   <div id="revealPhase" class="hidden">
     <h2>Imposter Reveal</h2>
-    <p id="revealText"></p>
+    <div id="revealText"></div>
   </div>
 
-  <script type="module" src="game.js"></script>
+  <!-- Single-File JS w/ Firebase -->
+  <script type="module">
+    // ---------------------------------------
+    // 1) Firebase Setup
+    // ---------------------------------------
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js';
+    import {
+      getDatabase, ref, set, update, get, onValue
+    } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js';
+
+    // REPLACE with your config if it changes
+    const firebaseConfig = {
+      apiKey: "AIzaSyA3JrnVvOPto_aQ95MasBEd68-du6gJmCA",
+      authDomain: "online-imposter.firebaseapp.com",
+      databaseURL: "https://online-imposter-default-rtdb.firebaseio.com",
+      projectId: "online-imposter",
+      storageBucket: "online-imposter.firebasestorage.app",
+      messagingSenderId: "925601269436",
+      appId: "1:925601269436:web:661f6b53a754b5ccbc32b9"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // ---------------------------------------
+    // 2) Global Variables
+    // ---------------------------------------
+    let playerName = "";
+    let lobbyCode = "";
+    let isHost = false;
+    let questionPair = null;
+    let imposter = "";
+
+    // Basic question array for debugging
+    const questions = [
+      {
+        main: "How many times have you been horseback riding in your life?",
+        imposter: "How many sleepaway camps have you been to?"
+      }
+      // ... add more if you like ...
+    ];
+
+    // DOM elements we need frequently
+    const homeDiv       = document.getElementById('home');
+    const lobbyDiv      = document.getElementById('lobby');
+    const questionDiv   = document.getElementById('questionPhase');
+    const answersDiv    = document.getElementById('readAnswers');
+    const mainDiv       = document.getElementById('mainReveal');
+    const votingDiv     = document.getElementById('votingPhase');
+    const revealDiv     = document.getElementById('revealPhase');
+
+    // ---------------------------------------
+    // 3) Utility / Navigation
+    // ---------------------------------------
+    function showDiv(divID) {
+      console.log("Navigating to:", divID);
+      [homeDiv, lobbyDiv, questionDiv, answersDiv, mainDiv, votingDiv, revealDiv]
+        .forEach(d => d.classList.add('hidden'));
+      document.getElementById(divID).classList.remove('hidden');
+    }
+
+    // ---------------------------------------
+    // 4) Lobby Handling
+    // ---------------------------------------
+    document.getElementById('createBtn').onclick = createLobby;
+    document.getElementById('joinBtn').onclick   = joinLobby;
+
+    async function createLobby() {
+      console.log("createLobby called");
+      playerName = document.getElementById("nameInput").value.trim();
+      if (!playerName) {
+        alert("Please enter a name.");
+        return;
+      }
+      lobbyCode = Math.random().toString(36).substring(2, 7).toUpperCase();
+      isHost = true;
+
+      console.log("Creating lobby:", lobbyCode, "host:", playerName);
+
+      await set(ref(db, `lobbies/${lobbyCode}`), {
+        players: { [playerName]: true },
+        host: playerName
+      });
+
+      enterLobby();
+    }
+
+    async function joinLobby() {
+      console.log("joinLobby called");
+      playerName = document.getElementById("nameInput").value.trim();
+      lobbyCode  = document.getElementById("joinCodeInput").value.trim().toUpperCase();
+
+      if (!playerName || !lobbyCode) {
+        alert("Please enter name and lobby code.");
+        return;
+      }
+
+      const lobbyRef = ref(db, `lobbies/${lobbyCode}`);
+      const snapshot = await get(lobbyRef);
+
+      if (!snapshot.exists()) {
+        alert("Lobby not found.");
+        return;
+      }
+
+      console.log("Joining lobby:", lobbyCode, "as", playerName);
+
+      isHost = (snapshot.val().host === playerName); // if your name matches the host in DB
+      await set(ref(db, `lobbies/${lobbyCode}/players/${playerName}`), true);
+      enterLobby();
+    }
+
+    function enterLobby() {
+      console.log("enterLobby =>", playerName, lobbyCode, "Host?", isHost);
+      showDiv("lobby");
+
+      document.getElementById("lobbyCodeDisplay").innerText = lobbyCode;
+
+      const playerList = document.getElementById("playerList");
+      onValue(ref(db, `lobbies/${lobbyCode}/players`), snapshot => {
+        playerList.innerHTML = '';
+        snapshot.forEach(child => {
+          const li = document.createElement("li");
+          li.innerText = child.key;
+          playerList.appendChild(li);
+        });
+      });
+
+      const startBtn = document.getElementById("startGameBtn");
+      if (isHost) {
+        startBtn.classList.remove("hidden");
+      } else {
+        startBtn.classList.add("hidden");
+      }
+
+      listenForPhaseChange();
+    }
+
+    // Host starts the game
+    document.getElementById("startGameBtn").onclick = startGame;
+
+    async function startGame() {
+      console.log("startGame called by host");
+      const snap = await get(ref(db, `lobbies/${lobbyCode}/players`));
+      const players = Object.keys(snap.val());
+
+      // pick imposter
+      imposter = players[Math.floor(Math.random() * players.length)];
+      // pick question
+      questionPair = questions[Math.floor(Math.random() * questions.length)];
+
+      console.log("Imposter:", imposter, "Question Pair:", questionPair);
+
+      // assign question to each player
+      for (const p of players) {
+        const q = (p === imposter) ? questionPair.imposter : questionPair.main;
+        await set(ref(db, `lobbies/${lobbyCode}/questions/${p}`), {
+          question: q,
+          answer: "",
+          ready: false,
+          vote: null
+        });
+      }
+
+      // change phase
+      update(ref(db, `lobbies/${lobbyCode}`), { phase: "questionPhase" });
+    }
+
+    // ---------------------------------------
+    // 5) Phase Handling
+    // ---------------------------------------
+    function listenForPhaseChange() {
+      console.log("listening for phase changes in lobby:", lobbyCode);
+      onValue(ref(db, `lobbies/${lobbyCode}/phase`), snapshot => {
+        const phase = snapshot.val();
+        if (!phase) return;
+        console.log("Current phase =>", phase);
+
+        showDiv(phase);
+
+        if (phase === "questionPhase") loadQuestion();
+        if (phase === "readAnswers")   loadAnswers();
+        if (phase === "votingPhase")   loadVoting();
+        if (phase === "revealPhase")   loadReveal();
+      });
+    }
+
+    // ---------------------------------------
+    // 6) Question Phase
+    // ---------------------------------------
+    const markReadyBtn = document.getElementById("markReadyBtn");
+    markReadyBtn.onclick = markReady;
+
+    async function loadQuestion() {
+      console.log("loadQuestion called");
+      const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`));
+      const questionObj = qSnap.val();
+      if (!questionObj) return;
+
+      document.getElementById("playerQuestion").innerText = questionObj.question;
+    }
+
+    async function markReady() {
+      console.log("markReady => sending answer + ready");
+      const answerField = document.createElement("input");
+      // Actually, let's do it differently: 
+      // We'll put an input in the HTML earlier or do it now
+      // But let's say you typed your answer?
+
+      // We'll do the simpler approach: We'll just read a prompt for debugging
+      // But we said in the code we want an <input>? Let's do it:
+      const inputEl = document.getElementById("answerField");
+      if (!inputEl) {
+        alert("No answer input found!");
+        return;
+      }
+      const answer = inputEl.value;
+      if (!answer) {
+        alert("Please type an answer!");
+        return;
+      }
+
+      await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), {
+        ready: true,
+        answer: answer
+      });
+
+      // Check if all are ready
+      onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
+        if (!snapshot.exists()) return;
+        const questionData = snapshot.val();
+        const allReady = Object.values(questionData).every(p => p.ready);
+        if (allReady) {
+          update(ref(db, `lobbies/${lobbyCode}`), { phase: "readAnswers" });
+        }
+      });
+    }
+
+    // ---------------------------------------
+    // 7) Read Answers
+    // ---------------------------------------
+    document.getElementById("revealMainBtn").onclick = revealMainQuestion;
+
+    async function loadAnswers() {
+      console.log("loadAnswers called");
+      const ansListEl = document.getElementById("answerList");
+      ansListEl.innerHTML = "";
+      const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions`));
+      if (!qSnap.exists()) return;
+
+      const allQs = qSnap.val();
+      for (const [pName, obj] of Object.entries(allQs)) {
+        const li = document.createElement("li");
+        li.textContent = `${pName}: ${obj.answer}`;
+        ansListEl.appendChild(li);
+      }
+    }
+
+    function revealMainQuestion() {
+      console.log("revealMainQuestion => main question + TTS");
+      showDiv("mainReveal");
+      document.getElementById("mainQuestionDisplay").innerText = questionPair.main;
+      speak(`The main question was: ${questionPair.main}`);
+    }
+
+    function speak(text) {
+      const msg = new SpeechSynthesisUtterance(text);
+      window.speechSynthesis.speak(msg);
+    }
+
+    // ---------------------------------------
+    // 8) Voting Phase
+    // ---------------------------------------
+    document.getElementById("goToVotingBtn").onclick = () => {
+      update(ref(db, `lobbies/${lobbyCode}`), { phase: "votingPhase" });
+    };
+
+    let hasVoted = false; // So we don't double-vote
+
+    async function loadVoting() {
+      console.log("loadVoting called");
+      const list = document.getElementById("voteList");
+      list.innerHTML = "";
+      document.getElementById("thanksForVoting").classList.add("hidden");
+
+      const playersSnap = await get(ref(db, `lobbies/${lobbyCode}/players`));
+      if (!playersSnap.exists()) return;
+      const playersObj = playersSnap.val();
+      const playerNames = Object.keys(playersObj);
+
+      playerNames.forEach(p => {
+        if (p !== playerName) {
+          const li = document.createElement("li");
+          const btn = document.createElement("button");
+          btn.textContent = `Vote ${p}`;
+          btn.onclick = () => submitVote(p);
+          li.appendChild(btn);
+          list.appendChild(li);
+        }
+      });
+    }
+
+    async function submitVote(voted) {
+      if (hasVoted) return; // no re-voting
+      hasVoted = true;
+
+      console.log("submitVote =>", voted);
+      await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), { vote: voted });
+
+      document.getElementById("thanksForVoting").classList.remove("hidden");
+      // check if everyone voted
+      onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
+        const data = snapshot.val();
+        if (!data) return;
+        const allVoted = Object.values(data).every(x => x.vote);
+        if (allVoted) {
+          update(ref(db, `lobbies/${lobbyCode}`), { phase: "revealPhase" });
+        }
+      });
+    }
+
+    // ---------------------------------------
+    // 9) Final Reveal
+    // ---------------------------------------
+    async function loadReveal() {
+      console.log("loadReveal called");
+      const revealDiv = document.getElementById("revealText");
+      revealDiv.innerHTML = "<p>Calculating votes...</p>";
+
+      const qSnap = await get(ref(db, `lobbies/${lobbyCode}/questions`));
+      if (!qSnap.exists()) {
+        revealDiv.innerHTML = "<p>No question data found!</p>";
+        return;
+      }
+
+      const qData = qSnap.val();
+      const votes = {};
+      const votedFor = {};
+
+      for (const [pName, obj] of Object.entries(qData)) {
+        const v = obj.vote;
+        if (!v) continue;
+        if (!votes[v]) votes[v] = 0;
+        votes[v]++;
+        if (!votedFor[v]) votedFor[v] = [];
+        votedFor[v].push(pName);
+      }
+
+      let html = "<h3>Voting Results:</h3>";
+      // Show each voted player and how many votes
+      for (const [player, count] of Object.entries(votes)) {
+        const whoVotedThem = votedFor[player].join(", ");
+        html += `<p>${player}: ${count} vote(s) - Voted by: ${whoVotedThem}</p>`;
+      }
+
+      // Determine top voted
+      const sorted = Object.entries(votes).sort((a, b) => b[1] - a[1]);
+      const topVoted = sorted[0][0];
+      const correct = (topVoted === imposter);
+
+      html += `<p><strong>${topVoted}</strong> was voted out. They were ${correct ? "the imposter ✅" : "not the imposter ❌"}.</p>`;
+      html += `<p>The imposter was <strong>${imposter}</strong>, and their question was: "${questionPair.imposter}"</p>`;
+
+      revealDiv.innerHTML = html;
+    }
+  </script>
 </body>
 </html>
