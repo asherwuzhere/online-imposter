@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Imposter Game</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 2em; }
+    input, button { margin: 0.5em; padding: 0.5em; font-size: 1em; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="home">
+    <h1>Imposter Game</h1>
+    <input id="nameInput" placeholder="Your Name" /> <br>
+    <button onclick="createLobby()">Create Lobby</button> <br>
+    <input id="joinCodeInput" placeholder="Enter Lobby Code" />
+    <button onclick="joinLobby()">Join Lobby</button>
+  </div>
+
+  <div id="lobby" class="hidden">
+    <h2>Lobby Code: <span id="lobbyCodeDisplay"></span></h2>
+    <h3>Players:</h3>
+    <ul id="playerList"></ul>
+    <button id="startGameBtn" onclick="startGame()" class="hidden">Start Game</button>
+  </div>
+
+  <div id="questionPhase" class="hidden">
+    <h2>Private Question</h2>
+    <p id="playerQuestion"></p>
+    <button onclick="markReady()">I've Written My Answer</button>
+  </div>
+
+  <div id="readAnswers" class="hidden">
+    <h2>Answer Reading Time</h2>
+    <p>Read your answer out loud now.</p>
+    <button onclick="revealMainQuestion()">Reveal Main Question</button>
+  </div>
+
+  <div id="mainReveal" class="hidden">
+    <h2>MAIN QUESTION</h2>
+    <p id="mainQuestionDisplay"></p>
+    <button onclick="goToVoting()">Go to Voting</button>
+  </div>
+
+  <div id="votingPhase" class="hidden">
+    <h2>Vote for the Imposter</h2>
+    <ul id="voteList"></ul>
+  </div>
+
+  <div id="revealPhase" class="hidden">
+    <h2>Imposter Reveal</h2>
+    <p id="revealText"></p>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>
