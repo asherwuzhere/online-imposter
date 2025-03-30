@@ -5,13 +5,13 @@ import {
 } from "https://www.gstatic.com/firebasejs/9.6.10/firebase-database.js";
 
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyA3JrnVvOPto_aQ95MasBEd68-du6gJmCA",
+  authDomain: "online-imposter.firebaseapp.com",
+  databaseURL: "https://online-imposter-default-rtdb.firebaseio.com",
+  projectId: "online-imposter",
+  storageBucket: "online-imposter.firebasestorage.app",
+  messagingSenderId: "925601269436",
+  appId: "1:925601269436:web:661f6b53a754b5ccbc32b9"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -128,6 +128,7 @@ const questions = [
   { main: "How many birthdays do you have saved in your calendar?", imposter: "How many reminders do you have set for this week?" }
 ];
 
+
 window.createLobby = async function () {
   playerName = document.getElementById("nameInput").value;
   lobbyCode = Math.random().toString(36).substring(2, 7).toUpperCase();
@@ -176,6 +177,7 @@ window.startGame = async function () {
     const q = p === imposter ? questionPair.imposter : questionPair.main;
     await set(ref(db, `lobbies/${lobbyCode}/questions/${p}`), {
       question: q,
+      answer: "",
       ready: false,
       vote: null
     });
@@ -191,17 +193,24 @@ onValue(ref(db, `lobbies/${lobbyCode}/phase`), snap => {
   document.getElementById(phase).classList.remove("hidden");
 
   if (phase === "questionPhase") loadQuestion();
+  if (phase === "readAnswers") loadAnswers();
   if (phase === "votingPhase") loadVoting();
   if (phase === "revealPhase") loadReveal();
 });
 
 async function loadQuestion() {
   const snap = await get(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`));
-  document.getElementById("playerQuestion").innerText = snap.val().question;
+  const question = snap.val().question;
+  document.getElementById("playerQuestion").innerText = question;
+  const answerInput = document.createElement("input");
+  answerInput.placeholder = "Type your answer...";
+  answerInput.id = "answerField";
+  document.getElementById("playerQuestion").appendChild(answerInput);
 }
 
 window.markReady = async function () {
-  await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), { ready: true });
+  const answer = document.getElementById("answerField").value;
+  await update(ref(db, `lobbies/${lobbyCode}/questions/${playerName}`), { ready: true, answer });
 
   onValue(ref(db, `lobbies/${lobbyCode}/questions`), snapshot => {
     const allReady = Object.values(snapshot.val()).every(p => p.ready);
@@ -209,10 +218,28 @@ window.markReady = async function () {
   });
 }
 
+function loadAnswers() {
+  get(ref(db, `lobbies/${lobbyCode}/questions`)).then(snapshot => {
+    const container = document.createElement("ul");
+    for (const [name, obj] of Object.entries(snapshot.val())) {
+      const li = document.createElement("li");
+      li.innerText = `${name}: ${obj.answer}`;
+      container.appendChild(li);
+    }
+    document.getElementById("readAnswers").appendChild(container);
+  });
+}
+
 window.revealMainQuestion = function () {
   document.getElementById("readAnswers").classList.add("hidden");
   document.getElementById("mainReveal").classList.remove("hidden");
   document.getElementById("mainQuestionDisplay").innerText = questionPair.main;
+  speak(`The main question was: ${questionPair.main}`);
+}
+
+function speak(text) {
+  const msg = new SpeechSynthesisUtterance(text);
+  window.speechSynthesis.speak(msg);
 }
 
 window.goToVoting = function () {
@@ -248,5 +275,29 @@ function submitVote(voted) {
 }
 
 function loadReveal() {
-  document.getElementById("revealText").innerText = `The imposter was ${imposter}!\nThey got the question: ${questionPair.imposter}`;
+  get(ref(db, `lobbies/${lobbyCode}/questions`)).then(snapshot => {
+    const votes = {};
+    const votedFor = {};
+
+    for (const [name, data] of Object.entries(snapshot.val())) {
+      const voted = data.vote;
+      if (!votes[voted]) votes[voted] = 0;
+      votes[voted]++;
+      if (!votedFor[voted]) votedFor[voted] = [];
+      votedFor[voted].push(name);
+    }
+
+    let result = "<h3>Voting Results:</h3>";
+    for (const [name, count] of Object.entries(votes)) {
+      result += `<p>${name}: ${count} vote(s) - Voted by: ${votedFor[name].join(", ")}</p>`;
+    }
+
+    const topVoted = Object.entries(votes).sort((a, b) => b[1] - a[1])[0][0];
+    const correct = topVoted === imposter;
+
+    result += `<p><strong>${topVoted}</strong> was voted out. They were ${correct ? "the imposter ✅" : "not the imposter ❌"}.</p>`;
+    result += `<p>The imposter was <strong>${imposter}</strong>, and their question was: "${questionPair.imposter}"</p>`;
+
+    document.getElementById("revealText").innerHTML = result;
+  });
 }
